@@ -92,8 +92,19 @@ export default function Dashboard() {
   const totalMonthlyExpense = essentialMonthly + flexibleMonthly;
   const rigidityScore = totalMonthlyExpense > 0 ? Math.round((essentialMonthly / totalMonthlyExpense) * 1000) / 10 : 50;
 
-  // 3. Real Baseline Survival Duration (Months)
-  const survivalMonths = totalMonthlyExpense > 0 ? Math.round((effectiveLiquidAssets / totalMonthlyExpense) * 10) / 10 : 0;
+  // 3. Real Emergency Survival Duration (Months)
+  // During an emergency shock, families deflated discretionary/flexible spending by 35%
+  // Crisis Burn = Essential Expenses + (Flexible Expenses * 0.65)
+  const crisisEmergencyMonthlyBurn = essentialMonthly + (flexibleMonthly * 0.65);
+  const survivalMonths = crisisEmergencyMonthlyBurn > 0
+    ? Math.round((effectiveLiquidAssets / crisisEmergencyMonthlyBurn) * 10) / 10
+    : 0;
+
+  // Normal lifestyle runway (without cutting flexible spending)
+  const unadjustedRunwayMonths = totalMonthlyExpense > 0
+    ? Math.round((effectiveLiquidAssets / totalMonthlyExpense) * 10) / 10
+    : 0;
+
 
   // --- Dynamic Liquidity Weight Slider Change ---
   const handleWeightChange = (assetId: string, newWeight: number) => {
@@ -473,8 +484,12 @@ export default function Dashboard() {
                 style={{ width: `${Math.min((survivalMonths / 12) * 100, 100)}%` }}
               ></div>
             </div>
-            <div className="text-xs text-slate-400 mt-2">Target: 6–12 months</div>
+            <div className="text-xs text-slate-400 mt-2 flex justify-between">
+              <span>Target: 6–12 mo</span>
+              <span className="text-emerald-400 font-medium">+35% flex cut applied</span>
+            </div>
           </div>
+
 
           {/* 2. Liquidity Score */}
           <div className="p-5 rounded-2xl bg-slate-900/60 border border-slate-800/80 shadow-sm">

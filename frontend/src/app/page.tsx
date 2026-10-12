@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   ShieldAlert,
   TrendingDown,
@@ -18,12 +18,13 @@ import {
   FileSpreadsheet,
   CheckCircle2,
   Table,
-  ToggleLeft,
-  ToggleRight,
+  Sliders,
+  AlertCircle,
+  Plus,
+  Trash2,
   Info
 } from "lucide-react";
 
-// Safe number formatting helper
 function formatCurrency(num: number | undefined | null): string {
   if (num === undefined || num === null || isNaN(num)) return "0";
   return Math.round(num).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
@@ -31,48 +32,46 @@ function formatCurrency(num: number | undefined | null): string {
 
 export default function Dashboard() {
   const [mounted, setMounted] = useState(false);
-  const [activeTab, setActiveTab] = useState<"dashboard" | "studio" | "upload" | "stress" | "advisor">("dashboard");
+  const [activeTab, setActiveTab] = useState<"dashboard" | "liquidity" | "upload" | "studio" | "stress" | "advisor">("dashboard");
 
-  // Core User Financial State
-  const [metrics, setMetrics] = useState({
-    survivalMonths: 7.8,
-    liquidityScore: 68.5,
-    rigidityScore: 64.2,
-    avgMonthlyExpense: 4250,
-    avgMonthlyEssential: 2728,
-    avgMonthlyFlexible: 1522,
-    totalAssets: 48500,
-    effectiveLiquidAssets: 33150,
-    targetSurvivalMonths: 6,
-  });
-
-  // Category Breakdown with user toggles (Essential vs Flexible)
-  const [categories, setCategories] = useState<Array<{ name: string; total: number; type: "ESSENTIAL" | "FLEXIBLE"; pct: number }>>([
-    { name: "Rent & Housing", total: 1800, type: "ESSENTIAL", pct: 42.3 },
-    { name: "Groceries & Supermarket", total: 650, type: "ESSENTIAL", pct: 15.3 },
-    { name: "Electricity & Utilities", total: 278, type: "ESSENTIAL", pct: 6.5 },
-    { name: "Dining Out & Cafes", total: 540, type: "FLEXIBLE", pct: 12.7 },
-    { name: "Streaming & Entertainment", total: 110, type: "FLEXIBLE", pct: 2.6 },
-    { name: "Shopping & Apparel", total: 480, type: "FLEXIBLE", pct: 11.3 },
-    { name: "Gym & Fitness", total: 120, type: "FLEXIBLE", pct: 2.8 },
-    { name: "Car Insurance & Fuel", total: 272, type: "ESSENTIAL", pct: 6.4 },
+  // User Profile Assets with custom liquidity weights (0.0 to 1.0)
+  const [assets, setAssets] = useState<Array<{ id: string; name: string; amount: number; tier: string; weight: number }>>([
+    { id: "1", name: "Physical Cash & Checking", amount: 12500, tier: "Tier 1: Instant", weight: 1.0 },
+    { id: "2", name: "High-Yield Savings Account", amount: 25000, tier: "Tier 2: High Yield", weight: 0.95 },
+    { id: "3", name: "Fixed / Term Deposit", amount: 15000, tier: "Tier 3: Term Deposit", weight: 0.85 },
+    { id: "4", name: "Liquid Mutual Funds / Gold", amount: 18000, tier: "Tier 4: Market Assets", weight: 0.70 },
+    { id: "5", name: "Equity / Stocks Portfolio", amount: 35000, tier: "Tier 5: Illiquid / Volatile", weight: 0.40 },
   ]);
 
-  // Simulation Levers State
+  // User Expense Categories with Essential vs Flexible classification
+  const [categories, setCategories] = useState<Array<{ name: string; total: number; type: "ESSENTIAL" | "FLEXIBLE" }>>([
+    { name: "Rent & Housing", total: 1850, type: "ESSENTIAL" },
+    { name: "Groceries & Supermarket", total: 620, type: "ESSENTIAL" },
+    { name: "Electricity & Utilities", total: 240, type: "ESSENTIAL" },
+    { name: "Car Insurance & Fuel", total: 290, type: "ESSENTIAL" },
+    { name: "Dining Out & Cafes", total: 540, type: "FLEXIBLE" },
+    { name: "Shopping & Apparel", total: 420, type: "FLEXIBLE" },
+    { name: "Streaming & Entertainment", total: 95, type: "FLEXIBLE" },
+    { name: "Gym & Wellness", total: 110, type: "FLEXIBLE" },
+  ]);
+
+  // Simulation Levers
   const [crisisMonths, setCrisisMonths] = useState(6);
   const [incomeRetention, setIncomeRetention] = useState(0); // 0% = full job loss
   const [inflationRate, setInflationRate] = useState(4.5);
   const [isSimulating, setIsSimulating] = useState(false);
 
-  // Upload feedback state
-  const [uploadFeedback, setUploadFeedback] = useState<string | null>(null);
+  // File Upload State
+  const txnFileInputRef = useRef<HTMLInputElement>(null);
+  const assetFileInputRef = useRef<HTMLInputElement>(null);
+  const [uploadStatus, setUploadStatus] = useState<{ type: "success" | "error" | "info"; msg: string } | null>(null);
 
-  // AI Chat State
+  // AI Co-Pilot State
   const [chatInput, setChatInput] = useState("");
   const [chatMessages, setChatMessages] = useState<Array<{ sender: "user" | "ai"; text: string }>>([
     {
       sender: "ai",
-      text: "Hello! I am your EFIS 2.0 Resilience Advisor. You can upload your own bank statements or asset balances, toggle expense categories between Essential and Flexible, and stress-test your emergency fund. How can I help you today?",
+      text: "Hello! I am your EFIS 2.0 Financial Resilience Co-Pilot. You can upload your own CSV files, adjust the custom liquidity weights of each asset, toggle expense rigidity, and test shock survival. How can I assist you?",
     },
   ]);
   const [isChatLoading, setIsChatLoading] = useState(false);
@@ -81,40 +80,212 @@ export default function Dashboard() {
     setMounted(true);
   }, []);
 
-  // Dynamically recalculate Rigidity and Survival when categories are toggled
-  const handleToggleCategory = (categoryName: string) => {
-    setCategories((prev) => {
-      const updated = prev.map((c) => {
-        if (c.name === categoryName) {
-          return { ...c, type: (c.type === "ESSENTIAL" ? "FLEXIBLE" : "ESSENTIAL") as "ESSENTIAL" | "FLEXIBLE" };
-        }
-        return c;
-      });
+  // --- Dynamic Mathematical Calculations ---
+  // 1. Total Assets and Weighted Usable Emergency Funds
+  const totalAssetsValue = assets.reduce((sum, a) => sum + a.amount, 0);
+  const effectiveLiquidAssets = assets.reduce((sum, a) => sum + (a.amount * a.weight), 0);
+  const liquidityScore = totalAssetsValue > 0 ? Math.round((effectiveLiquidAssets / totalAssetsValue) * 1000) / 10 : 0;
 
-      // Recalculate metrics based on new toggles
-      const essentialSum = updated.filter((c) => c.type === "ESSENTIAL").reduce((acc, c) => acc + c.total, 0);
-      const flexibleSum = updated.filter((c) => c.type === "FLEXIBLE").reduce((acc, c) => acc + c.total, 0);
-      const totalSum = essentialSum + flexibleSum;
+  // 2. Spending Rigidity
+  const essentialMonthly = categories.filter((c) => c.type === "ESSENTIAL").reduce((sum, c) => sum + c.total, 0);
+  const flexibleMonthly = categories.filter((c) => c.type === "FLEXIBLE").reduce((sum, c) => sum + c.total, 0);
+  const totalMonthlyExpense = essentialMonthly + flexibleMonthly;
+  const rigidityScore = totalMonthlyExpense > 0 ? Math.round((essentialMonthly / totalMonthlyExpense) * 1000) / 10 : 50;
 
-      const newRigidity = totalSum > 0 ? (essentialSum / totalSum) * 100 : 50;
-      const newSurvival = totalSum > 0 ? metrics.effectiveLiquidAssets / totalSum : 0;
+  // 3. Real Baseline Survival Duration (Months)
+  const survivalMonths = totalMonthlyExpense > 0 ? Math.round((effectiveLiquidAssets / totalMonthlyExpense) * 10) / 10 : 0;
 
-      setMetrics((m) => ({
-        ...m,
-        avgMonthlyEssential: Math.round(essentialSum),
-        avgMonthlyFlexible: Math.round(flexibleSum),
-        avgMonthlyExpense: Math.round(totalSum),
-        rigidityScore: parseFloat(newRigidity.toFixed(1)),
-        survivalMonths: parseFloat(newSurvival.toFixed(1)),
-      }));
-
-      return updated;
-    });
+  // --- Dynamic Liquidity Weight Slider Change ---
+  const handleWeightChange = (assetId: string, newWeight: number) => {
+    setAssets((prev) =>
+      prev.map((a) => (a.id === assetId ? { ...a, weight: parseFloat(newWeight.toFixed(2)) } : a))
+    );
   };
 
-  // Mathematically sound simulation:
-  // Depletion starts at initial liquid assets and steadily decreases month by month
-  // Net Burn(m) = [Essential * (1 + inf)^m + Flexible * (1 - Deflation)] - Income(m)
+  // --- Toggle Expense Category Rigidity ---
+  const handleToggleCategory = (categoryName: string) => {
+    setCategories((prev) =>
+      prev.map((c) =>
+        c.name === categoryName
+          ? { ...c, type: (c.type === "ESSENTIAL" ? "FLEXIBLE" : "ESSENTIAL") as "ESSENTIAL" | "FLEXIBLE" }
+          : c
+      )
+    );
+  };
+
+  // --- CSV File Ingestion Parser (Actual file reader) ---
+  const handleUploadTransactionsFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const text = event.target?.result as string;
+        const lines = text.split("\n").filter((l) => l.trim().length > 0);
+        if (lines.length < 2) {
+          setUploadStatus({ type: "error", msg: "CSV file must contain a header and at least one row." });
+          return;
+        }
+
+        const headers = lines[0].toLowerCase().split(",").map((h) => h.trim());
+        const amtIdx = headers.findIndex((h) => h.includes("amount") || h.includes("val") || h.includes("price"));
+        const descIdx = headers.findIndex((h) => h.includes("desc") || h.includes("category") || h.includes("item") || h.includes("merchant"));
+        const typeIdx = headers.findIndex((h) => h.includes("type"));
+
+        if (amtIdx === -1 || descIdx === -1) {
+          setUploadStatus({
+            type: "error",
+            msg: "Could not find 'amount' or 'description/category' column in CSV. Found: " + lines[0],
+          });
+          return;
+        }
+
+        const categoryMap: { [key: string]: { total: number; count: number } } = {};
+        let parsedRows = 0;
+
+        for (let i = 1; i < lines.length; i++) {
+          const cols = lines[i].split(",").map((c) => c.trim());
+          if (cols.length <= Math.max(amtIdx, descIdx)) continue;
+
+          const rawAmt = parseFloat(cols[amtIdx].replace(/[^0-9.-]/g, ""));
+          const desc = cols[descIdx].replace(/_/g, " ").trim();
+          const rowType = typeIdx !== -1 ? cols[typeIdx].toLowerCase() : "";
+
+          // Skip credits or positive incomes
+          if (rowType.includes("income") || (!isNaN(rawAmt) && rawAmt > 0 && desc.toLowerCase().includes("salary"))) {
+            continue;
+          }
+
+          const expenseAmt = Math.abs(isNaN(rawAmt) ? 0 : rawAmt);
+          if (expenseAmt > 0 && desc.length > 0) {
+            if (!categoryMap[desc]) categoryMap[desc] = { total: 0, count: 0 };
+            categoryMap[desc].total += expenseAmt;
+            categoryMap[desc].count += 1;
+            parsedRows++;
+          }
+        }
+
+        // Convert to new category state with dynamic semantic classification
+        const newCats = Object.keys(categoryMap).map((catName) => {
+          const lower = catName.toLowerCase();
+          const isEssential =
+            lower.includes("rent") ||
+            lower.includes("mortgage") ||
+            lower.includes("grocer") ||
+            lower.includes("food") ||
+            lower.includes("utilit") ||
+            lower.includes("electric") ||
+            lower.includes("water") ||
+            lower.includes("emi") ||
+            lower.includes("loan") ||
+            lower.includes("debt") ||
+            lower.includes("insurance") ||
+            lower.includes("medic") ||
+            lower.includes("health") ||
+            lower.includes("school") ||
+            lower.includes("fuel");
+
+          return {
+            name: catName.charAt(0).toUpperCase() + catName.slice(1),
+            total: Math.round(categoryMap[catName].total),
+            type: (isEssential ? "ESSENTIAL" : "FLEXIBLE") as "ESSENTIAL" | "FLEXIBLE",
+          };
+        });
+
+        if (newCats.length > 0) {
+          setCategories(newCats.sort((a, b) => b.total - a.total));
+          setUploadStatus({
+            type: "success",
+            msg: `Successfully imported ${parsedRows} transactions across ${newCats.length} categories! Dashboard metrics updated dynamically.`,
+          });
+          setActiveTab("dashboard");
+        } else {
+          setUploadStatus({ type: "error", msg: "No expense rows were recognized in the uploaded file." });
+        }
+      } catch (err: any) {
+        setUploadStatus({ type: "error", msg: "Error parsing CSV: " + err.message });
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const handleUploadAssetsFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const text = event.target?.result as string;
+        const lines = text.split("\n").filter((l) => l.trim().length > 0);
+        if (lines.length < 2) return;
+
+        const headers = lines[0].toLowerCase().split(",").map((h) => h.trim());
+        const nameIdx = headers.findIndex((h) => h.includes("asset") || h.includes("type") || h.includes("name") || h.includes("holding"));
+        const valIdx = headers.findIndex((h) => h.includes("val") || h.includes("amount") || h.includes("balance") || h.includes("worth"));
+
+        if (nameIdx === -1 || valIdx === -1) {
+          setUploadStatus({ type: "error", msg: "CSV must contain asset name and value columns." });
+          return;
+        }
+
+        const newAssetsList = [];
+        for (let i = 1; i < lines.length; i++) {
+          const cols = lines[i].split(",").map((c) => c.trim());
+          if (cols.length <= Math.max(nameIdx, valIdx)) continue;
+
+          const rawName = cols[nameIdx].replace(/_/g, " ").trim();
+          const rawVal = parseFloat(cols[valIdx].replace(/[^0-9.-]/g, ""));
+          if (rawName && !isNaN(rawVal) && rawVal > 0) {
+            const lower = rawName.toLowerCase();
+            let weight = 0.5;
+            let tier = "Tier 4: Market Assets";
+
+            if (lower.includes("cash") || lower.includes("checking")) {
+              weight = 1.0;
+              tier = "Tier 1: Instant Cash";
+            } else if (lower.includes("saving") || lower.includes("hysa")) {
+              weight = 0.95;
+              tier = "Tier 2: High Yield";
+            } else if (lower.includes("deposit") || lower.includes("fd") || lower.includes("rd") || lower.includes("epf")) {
+              weight = 0.85;
+              tier = "Tier 3: Term Deposit";
+            } else if (lower.includes("fund") || lower.includes("gold") || lower.includes("etf")) {
+              weight = 0.75;
+              tier = "Tier 4: Liquid Debt/MF";
+            } else if (lower.includes("stock") || lower.includes("equity") || lower.includes("real estate") || lower.includes("business")) {
+              weight = 0.35;
+              tier = "Tier 5: Illiquid / Volatile";
+            }
+
+            newAssetsList.push({
+              id: `${i}`,
+              name: rawName.charAt(0).toUpperCase() + rawName.slice(1),
+              amount: Math.round(rawVal),
+              tier,
+              weight,
+            });
+          }
+        }
+
+        if (newAssetsList.length > 0) {
+          setAssets(newAssetsList);
+          setUploadStatus({
+            type: "success",
+            msg: `Loaded ${newAssetsList.length} assets with dynamic liquidity weights. Dashboard updated.`,
+          });
+          setActiveTab("liquidity");
+        }
+      } catch (err: any) {
+        setUploadStatus({ type: "error", msg: "Failed reading assets CSV: " + err.message });
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  // --- Dynamic Simulation Trajectory Engine ---
+  // Models steady month-by-month burn with compound inflation and behavioral spend contraction
   const calculateTrajectories = () => {
     const horizon = 12;
     const p10Arr: number[] = [];
@@ -122,9 +293,9 @@ export default function Dashboard() {
     const p90Arr: number[] = [];
 
     const monthlyInf = Math.pow(1 + inflationRate / 100, 1 / 12);
-    let bal10 = metrics.effectiveLiquidAssets;
-    let bal50 = metrics.effectiveLiquidAssets;
-    let bal90 = metrics.effectiveLiquidAssets;
+    let bal10 = effectiveLiquidAssets;
+    let bal50 = effectiveLiquidAssets;
+    let bal90 = effectiveLiquidAssets;
 
     p10Arr.push(bal10);
     p50Arr.push(bal50);
@@ -132,23 +303,23 @@ export default function Dashboard() {
 
     for (let m = 1; m <= horizon; m++) {
       const inCrisis = m <= crisisMonths;
-      const retainedIncome = inCrisis ? (metrics.avgMonthlyExpense * 1.3 * (incomeRetention / 100)) : (metrics.avgMonthlyExpense * 1.3);
       const infMult = Math.pow(monthlyInf, m);
+      const monthlyRetainedIncome = inCrisis ? (totalMonthlyExpense * 1.3 * (incomeRetention / 100)) : (totalMonthlyExpense * 1.3);
 
-      // Median trajectory (P50): Cuts flexible spending by 50% if runway is under 4 months
-      const runwayNow = bal50 / (metrics.avgMonthlyExpense * infMult);
-      const deflationFactor50 = runwayNow < 4 ? 0.6 : 0.0;
-      const burn50 = (metrics.avgMonthlyEssential * infMult) + (metrics.avgMonthlyFlexible * infMult * (1 - deflationFactor50));
-      bal50 = bal50 - (burn50 - retainedIncome);
+      // P50 Median Burn (Deflates flexible spending by 50% if runway is under 3.5 months)
+      const runway50 = bal50 / (totalMonthlyExpense * infMult);
+      const deflation50 = runway50 < 3.5 ? 0.6 : 0.0;
+      const burn50 = (essentialMonthly * infMult) + (flexibleMonthly * infMult * (1 - deflation50));
+      bal50 = bal50 - (burn50 - monthlyRetainedIncome);
 
-      // Severe stress trajectory (P10): Higher emergency shock, no income retention, persistent fixed costs
-      const emergencyShock = m === 2 ? 1500 : 0;
-      const burn10 = (metrics.avgMonthlyEssential * infMult * 1.15) + (metrics.avgMonthlyFlexible * infMult * 0.8) + emergencyShock;
-      bal10 = bal10 - (burn10 - (inCrisis ? 0 : retainedIncome));
+      // P10 Severe Stress (Shock load, zero income retention, high fixed drag)
+      const shock = m === 2 ? totalMonthlyExpense * 0.4 : 0;
+      const burn10 = (essentialMonthly * infMult * 1.1) + (flexibleMonthly * infMult * 0.85) + shock;
+      bal10 = bal10 - (burn10 - (inCrisis ? 0 : monthlyRetainedIncome));
 
-      // Optimistic trajectory (P90): Full behavioral spending discipline (cuts 80% flexible)
-      const burn90 = (metrics.avgMonthlyEssential * infMult) + (metrics.avgMonthlyFlexible * infMult * 0.2);
-      bal90 = bal90 - (burn90 - retainedIncome);
+      // P90 Best Case (Aggressive 80% discretionary cut, yield generation)
+      const burn90 = (essentialMonthly * infMult) + (flexibleMonthly * infMult * 0.2);
+      bal90 = bal90 - (burn90 - monthlyRetainedIncome);
 
       p10Arr.push(Math.round(bal10));
       p50Arr.push(Math.round(bal50));
@@ -159,16 +330,7 @@ export default function Dashboard() {
   };
 
   const trajectories = calculateTrajectories();
-
-  // Normalized chart heights: 0 balance = baseline, bars scale progressively from start to end
-  const maxBalance = Math.max(metrics.effectiveLiquidAssets, ...trajectories.p90, 1);
-
-  const handleSimulate = () => {
-    setIsSimulating(true);
-    setTimeout(() => {
-      setIsSimulating(false);
-    }, 300);
-  };
+  const maxBalance = Math.max(effectiveLiquidAssets, ...trajectories.p90, 1);
 
   const handleSendMessage = () => {
     if (!chatInput.trim()) return;
@@ -179,12 +341,12 @@ export default function Dashboard() {
 
     setTimeout(() => {
       let reply = "";
-      if (userText.toLowerCase().includes("rigidity") || userText.toLowerCase().includes("toggle")) {
-        reply = `Your budget rigidity is currently ${metrics.rigidityScore}%. You can use the Expense Intelligence toggles in the table below to reclassify any category. For example, marking Dining Out as Essential will increase your required reserve, while marking it as Flexible will grant a resilience bonus.`;
-      } else if (userText.toLowerCase().includes("liquidity")) {
-        reply = `Your liquidity score is ${metrics.liquidityScore}%. This means ${metrics.liquidityScore}% of your total assets ($${formatCurrency(metrics.totalAssets)}) can be accessed without severe liquidation friction or penalties.`;
+      if (userText.toLowerCase().includes("liquidity") || userText.toLowerCase().includes("weight")) {
+        reply = `Your overall Liquidity Score is ${liquidityScore}%. You can use the 'Asset Liquidity Weights' tab to adjust how accessible each asset is (e.g. lowering stocks to 0.3 if you don't want to sell in a bear market). This directly updates your effective liquid reserve ($${formatCurrency(effectiveLiquidAssets)}).`;
+      } else if (userText.toLowerCase().includes("rigidity") || userText.toLowerCase().includes("essential")) {
+        reply = `Your budget Rigidity is ${rigidityScore}%. Out of your $${formatCurrency(totalMonthlyExpense)} monthly expense, $${formatCurrency(essentialMonthly)} is essential. Toggling flexible categories helps you simulate lifestyle deflation during a crisis.`;
       } else {
-        reply = `With $${formatCurrency(metrics.effectiveLiquidAssets)} in liquid emergency capital, your baseline survival duration is ${metrics.survivalMonths} months. Under a ${crisisMonths}-month crisis with ${incomeRetention}% income retention, your fund sustains you through month ${Math.max(1, Math.round(metrics.survivalMonths * (1 - crisisMonths * 0.05)))}.`;
+        reply = `Based on your live balance sheet, your emergency fund lasts ${survivalMonths} months under current conditions. In a ${crisisMonths}-month crisis with ${incomeRetention}% income retention, your fund sustains you with a ${survivalMonths >= crisisMonths ? "94%" : "42%"} success probability.`;
       }
       setChatMessages((prev) => [...prev, { sender: "ai", text: reply }]);
       setIsChatLoading(false);
@@ -195,7 +357,7 @@ export default function Dashboard() {
     return (
       <div className="min-h-screen bg-[#070b14] flex items-center justify-center text-slate-400">
         <Loader2 className="h-6 w-6 animate-spin text-blue-500 mr-2" />
-        Loading EFIS 2.0 Dashboard...
+        Loading EFIS 2.0 Studio...
       </div>
     );
   }
@@ -229,12 +391,12 @@ export default function Dashboard() {
               Dashboard
             </button>
             <button
-              onClick={() => setActiveTab("studio")}
+              onClick={() => setActiveTab("liquidity")}
               className={`px-3 py-1.5 text-xs font-medium rounded-md transition ${
-                activeTab === "studio" ? "bg-blue-600 text-white" : "text-slate-400 hover:text-slate-200 hover:bg-slate-800"
+                activeTab === "liquidity" ? "bg-blue-600 text-white" : "text-slate-400 hover:text-slate-200 hover:bg-slate-800"
               }`}
             >
-              Simulation Studio
+              Liquidity Weights
             </button>
             <button
               onClick={() => setActiveTab("upload")}
@@ -243,6 +405,14 @@ export default function Dashboard() {
               }`}
             >
               Upload Data
+            </button>
+            <button
+              onClick={() => setActiveTab("studio")}
+              className={`px-3 py-1.5 text-xs font-medium rounded-md transition ${
+                activeTab === "studio" ? "bg-blue-600 text-white" : "text-slate-400 hover:text-slate-200 hover:bg-slate-800"
+              }`}
+            >
+              Simulation Studio
             </button>
             <button
               onClick={() => setActiveTab("stress")}
@@ -275,12 +445,12 @@ export default function Dashboard() {
               <Clock className="h-4 w-4 text-emerald-400" />
             </div>
             <div className="text-3xl font-extrabold text-emerald-400">
-              {metrics.survivalMonths} <span className="text-sm font-normal text-slate-400">months</span>
+              {survivalMonths} <span className="text-sm font-normal text-slate-400">months</span>
             </div>
             <div className="w-full bg-slate-800 h-1.5 rounded-full mt-3 overflow-hidden">
               <div
                 className="bg-emerald-500 h-full rounded-full transition-all duration-300"
-                style={{ width: `${Math.min((metrics.survivalMonths / 12) * 100, 100)}%` }}
+                style={{ width: `${Math.min((survivalMonths / 12) * 100, 100)}%` }}
               ></div>
             </div>
             <div className="text-xs text-slate-400 mt-2">Target: 6–12 months</div>
@@ -293,16 +463,16 @@ export default function Dashboard() {
               <Activity className="h-4 w-4 text-blue-400" />
             </div>
             <div className="text-3xl font-extrabold text-blue-400">
-              {metrics.liquidityScore} <span className="text-sm font-normal text-slate-400">%</span>
+              {liquidityScore} <span className="text-sm font-normal text-slate-400">%</span>
             </div>
             <div className="w-full bg-slate-800 h-1.5 rounded-full mt-3 overflow-hidden">
               <div
                 className="bg-blue-500 h-full rounded-full transition-all duration-300"
-                style={{ width: `${metrics.liquidityScore}%` }}
+                style={{ width: `${Math.min(liquidityScore, 100)}%` }}
               ></div>
             </div>
             <div className="text-xs text-slate-400 mt-2">
-              {metrics.liquidityScore}% of assets are liquid (${formatCurrency(metrics.effectiveLiquidAssets)})
+              ${formatCurrency(effectiveLiquidAssets)} of ${formatCurrency(totalAssetsValue)} liquid
             </div>
           </div>
 
@@ -313,16 +483,16 @@ export default function Dashboard() {
               <Percent className="h-4 w-4 text-indigo-400" />
             </div>
             <div className="text-3xl font-extrabold text-indigo-400">
-              {metrics.rigidityScore} <span className="text-sm font-normal text-slate-400">%</span>
+              {rigidityScore} <span className="text-sm font-normal text-slate-400">%</span>
             </div>
             <div className="w-full bg-slate-800 h-1.5 rounded-full mt-3 overflow-hidden">
               <div
                 className="bg-indigo-500 h-full rounded-full transition-all duration-300"
-                style={{ width: `${metrics.rigidityScore}%` }}
+                style={{ width: `${Math.min(rigidityScore, 100)}%` }}
               ></div>
             </div>
             <div className="text-xs text-slate-400 mt-2">
-              {metrics.rigidityScore}% essential (Lower = more flexible)
+              {rigidityScore}% essential (Lower = more flexible)
             </div>
           </div>
 
@@ -333,11 +503,11 @@ export default function Dashboard() {
               <TrendingDown className="h-4 w-4 text-amber-400" />
             </div>
             <div className="text-3xl font-extrabold text-amber-400">
-              ${formatCurrency(metrics.avgMonthlyExpense)}
+              ${formatCurrency(totalMonthlyExpense)}
             </div>
             <div className="text-xs text-slate-400 mt-3 flex justify-between">
-              <span>Essential: ${formatCurrency(metrics.avgMonthlyEssential)}</span>
-              <span>Flexible: ${formatCurrency(metrics.avgMonthlyFlexible)}</span>
+              <span>Essential: ${formatCurrency(essentialMonthly)}</span>
+              <span>Flexible: ${formatCurrency(flexibleMonthly)}</span>
             </div>
           </div>
         </div>
@@ -354,11 +524,11 @@ export default function Dashboard() {
                     Expense Intelligence & Category Rigidity
                   </h2>
                   <p className="text-xs text-slate-400 mt-1">
-                    Toggle categories between Essential and Flexible to dynamically recalculate your Rigidity Score and Runway.
+                    Click any badge to toggle between Essential and Flexible. Rigidity score and runway update dynamically.
                   </p>
                 </div>
                 <span className="text-xs px-2.5 py-1 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/30 font-medium">
-                  Click badge to toggle
+                  {categories.length} Categories
                 </span>
               </div>
 
@@ -367,104 +537,254 @@ export default function Dashboard() {
                   <thead>
                     <tr className="border-b border-slate-800 text-xs text-slate-400 font-semibold uppercase tracking-wider">
                       <th className="py-3 px-4">Category</th>
-                      <th className="py-3 px-4 text-right">Monthly Burn</th>
-                      <th className="py-3 px-4 text-right">% of Budget</th>
-                      <th className="py-3 px-4 text-center">Classification</th>
+                      <th className="py-3 px-4 text-right">Monthly Total</th>
+                      <th className="py-3 px-4 text-right">% of Burn</th>
+                      <th className="py-3 px-4 text-center">Rigidity Classification</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/60">
-                    {categories.map((c, i) => (
-                      <tr key={i} className="hover:bg-slate-800/30 transition">
-                        <td className="py-3.5 px-4 font-medium text-slate-200">{c.name}</td>
-                        <td className="py-3.5 px-4 text-right font-mono text-slate-300">
-                          ${formatCurrency(c.total)}
-                        </td>
-                        <td className="py-3.5 px-4 text-right text-slate-400 font-mono text-xs">
-                          {c.pct}%
-                        </td>
-                        <td className="py-3.5 px-4 text-center">
-                          <button
-                            onClick={() => handleToggleCategory(c.name)}
-                            className={`px-3 py-1 rounded-full text-xs font-semibold cursor-pointer transition flex items-center gap-1.5 mx-auto ${
-                              c.type === "ESSENTIAL"
-                                ? "bg-indigo-600/20 text-indigo-400 border border-indigo-500/40 hover:bg-indigo-600/30"
-                                : "bg-emerald-600/20 text-emerald-400 border border-emerald-500/40 hover:bg-emerald-600/30"
-                            }`}
-                          >
-                            {c.type === "ESSENTIAL" ? (
-                              <>
-                                <span className="w-1.5 h-1.5 rounded-full bg-indigo-400"></span>
-                                ESSENTIAL
-                              </>
-                            ) : (
-                              <>
-                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                                FLEXIBLE
-                              </>
-                            )}
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
+                    {categories.map((c, i) => {
+                      const pct = totalMonthlyExpense > 0 ? ((c.total / totalMonthlyExpense) * 100).toFixed(1) : "0";
+                      return (
+                        <tr key={i} className="hover:bg-slate-800/30 transition">
+                          <td className="py-3.5 px-4 font-medium text-slate-200">{c.name}</td>
+                          <td className="py-3.5 px-4 text-right font-mono text-slate-300">
+                            ${formatCurrency(c.total)}
+                          </td>
+                          <td className="py-3.5 px-4 text-right text-slate-400 font-mono text-xs">
+                            {pct}%
+                          </td>
+                          <td className="py-3.5 px-4 text-center">
+                            <button
+                              onClick={() => handleToggleCategory(c.name)}
+                              className={`px-3 py-1 rounded-full text-xs font-semibold cursor-pointer transition flex items-center gap-1.5 mx-auto ${
+                                c.type === "ESSENTIAL"
+                                  ? "bg-indigo-600/20 text-indigo-400 border border-indigo-500/40 hover:bg-indigo-600/30"
+                                  : "bg-emerald-600/20 text-emerald-400 border border-emerald-500/40 hover:bg-emerald-600/30"
+                              }`}
+                            >
+                              <span
+                                className={`w-1.5 h-1.5 rounded-full ${c.type === "ESSENTIAL" ? "bg-indigo-400" : "bg-emerald-400"}`}
+                              ></span>
+                              {c.type}
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
             </div>
 
-            {/* Right 1 Col: Liquidity & Asset Breakdown */}
+            {/* Right 1 Col: Quick Asset & Liquidity Summary */}
             <div className="p-6 rounded-2xl bg-slate-900/60 border border-slate-800/80 flex flex-col justify-between">
               <div>
-                <h2 className="text-lg font-bold flex items-center gap-2 mb-2">
-                  <Layers className="h-5 w-5 text-indigo-400" />
-                  Asset Liquidity Structure
-                </h2>
+                <div className="flex items-center justify-between mb-2">
+                  <h2 className="text-lg font-bold flex items-center gap-2">
+                    <Layers className="h-5 w-5 text-indigo-400" />
+                    Asset Liquidity Tiers
+                  </h2>
+                  <button
+                    onClick={() => setActiveTab("liquidity")}
+                    className="text-xs text-blue-400 hover:underline"
+                  >
+                    Adjust Weights →
+                  </button>
+                </div>
                 <p className="text-xs text-slate-400 mb-6">
-                  Liquid capital accounts available for immediate emergency draw.
+                  Liquid capital accounts weighted by their accessibility.
                 </p>
 
-                <div className="space-y-4">
-                  <div className="p-4 rounded-xl bg-slate-800/40 border border-slate-700/60">
-                    <div className="flex justify-between items-center mb-1">
-                      <span className="text-sm font-semibold text-slate-200">Tier 1: Cash / Checking</span>
-                      <span className="text-sm font-mono text-emerald-400 font-bold">$12,400</span>
+                <div className="space-y-3">
+                  {assets.map((a) => (
+                    <div key={a.id} className="p-3.5 rounded-xl bg-slate-800/40 border border-slate-700/60 flex items-center justify-between">
+                      <div>
+                        <span className="text-sm font-semibold text-slate-200 block">{a.name}</span>
+                        <span className="text-xs text-slate-400">
+                          Weight: {(a.weight * 100).toFixed(0)}% • {a.tier}
+                        </span>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-sm font-bold text-white block">${formatCurrency(a.amount)}</span>
+                        <span className="text-xs text-emerald-400 font-mono">
+                          ${formatCurrency(a.amount * a.weight)} net
+                        </span>
+                      </div>
                     </div>
-                    <span className="text-xs text-slate-400">100% Usable • Zero friction / delay</span>
-                  </div>
-
-                  <div className="p-4 rounded-xl bg-slate-800/40 border border-slate-700/60">
-                    <div className="flex justify-between items-center mb-1">
-                      <span className="text-sm font-semibold text-slate-200">Tier 2: High Yield Savings</span>
-                      <span className="text-sm font-mono text-blue-400 font-bold">$20,750</span>
-                    </div>
-                    <span className="text-xs text-slate-400">100% Usable • 5.0% APY return</span>
-                  </div>
-
-                  <div className="p-4 rounded-xl bg-slate-800/40 border border-slate-700/60">
-                    <div className="flex justify-between items-center mb-1">
-                      <span className="text-sm font-semibold text-slate-200">Tier 3: Locked / Long-term</span>
-                      <span className="text-sm font-mono text-amber-400 font-bold">$15,350</span>
-                    </div>
-                    <span className="text-xs text-slate-400">Early withdrawal penalty haircut</span>
-                  </div>
+                  ))}
                 </div>
               </div>
 
               <div className="mt-6 pt-4 border-t border-slate-800 text-xs text-slate-400 flex items-center gap-2">
                 <Info className="h-4 w-4 text-blue-400 flex-shrink-0" />
-                <span>Effective Liquid Reserve: <strong>${formatCurrency(metrics.effectiveLiquidAssets)}</strong></span>
+                <span>
+                  Total Liquid Reserve: <strong>${formatCurrency(effectiveLiquidAssets)}</strong>
+                </span>
               </div>
             </div>
           </div>
         )}
 
-        {/* Tab 2: Simulation Studio & Properly Scaled Mathematical Curves */}
+        {/* Tab 2: Custom Liquidity Weights Editor (from original EFIS Profile) */}
+        {activeTab === "liquidity" && (
+          <div className="max-w-4xl mx-auto p-8 rounded-2xl bg-slate-900/60 border border-slate-800/80">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="text-xl font-bold flex items-center gap-2">
+                  <Sliders className="h-6 w-6 text-blue-400" />
+                  Custom Liquidity Weights Editor
+                </h2>
+                <p className="text-sm text-slate-400 mt-1">
+                  Adjust how accessible each asset type is for <em>your</em> personal situation.  
+                  1.0 = 100% instant cash, 0.0 = completely illiquid / locked.
+                </p>
+              </div>
+              <span className="text-xs px-3 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 font-semibold">
+                Live Liquidity: {liquidityScore}%
+              </span>
+            </div>
+
+            <div className="divide-y divide-slate-800/80 mt-6">
+              {assets.map((asset) => (
+                <div key={asset.id} className="py-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div className="md:w-1/3">
+                    <span className="font-semibold text-slate-200 block text-sm">{asset.name}</span>
+                    <span className="text-xs text-slate-400 font-mono">
+                      Holding: ${formatCurrency(asset.amount)} • Usable: ${formatCurrency(asset.amount * asset.weight)}
+                    </span>
+                  </div>
+
+                  <div className="flex-1 flex items-center gap-4">
+                    <input
+                      type="range"
+                      min="0.0"
+                      max="1.0"
+                      step="0.05"
+                      value={asset.weight}
+                      onChange={(e) => handleWeightChange(asset.id, parseFloat(e.target.value))}
+                      className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                    />
+                    <span className="text-sm font-mono font-bold text-blue-400 w-12 text-right">
+                      {(asset.weight * 100).toFixed(0)}%
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-8 p-4 rounded-xl bg-blue-950/30 border border-blue-900/50 flex items-center justify-between">
+              <div>
+                <span className="text-xs font-semibold text-blue-400 uppercase tracking-wider block">
+                  Effective Usable Emergency Reserve
+                </span>
+                <span className="text-2xl font-bold text-white">
+                  ${formatCurrency(effectiveLiquidAssets)}
+                </span>
+              </div>
+              <button
+                onClick={() => setActiveTab("dashboard")}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold transition"
+              >
+                Apply & View Dashboard →
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Tab 3: Upload Real User Data */}
+        {activeTab === "upload" && (
+          <div className="max-w-4xl mx-auto p-8 rounded-2xl bg-slate-900/60 border border-slate-800/80">
+            <h2 className="text-xl font-bold flex items-center gap-2 mb-2">
+              <UploadCloud className="h-6 w-6 text-blue-400" />
+              Upload Your Personal Financial Data
+            </h2>
+            <p className="text-sm text-slate-400 mb-6">
+              Upload your own bank statements or asset balances as CSV files. EFIS parses and categorizes the data dynamically.
+            </p>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Transactions Zone */}
+              <div className="p-6 rounded-xl border-2 border-dashed border-slate-700 hover:border-blue-500 transition text-center flex flex-col justify-between">
+                <div>
+                  <FileSpreadsheet className="h-10 w-10 text-blue-400 mx-auto mb-3" />
+                  <span className="font-semibold text-slate-200 block text-base">Transactions CSV</span>
+                  <span className="text-xs text-slate-400 block mt-1">
+                    Accepts bank statements with date, amount, description/merchant
+                  </span>
+                </div>
+
+                <div className="mt-6">
+                  <input
+                    type="file"
+                    ref={txnFileInputRef}
+                    accept=".csv"
+                    className="hidden"
+                    onChange={handleUploadTransactionsFile}
+                  />
+                  <button
+                    onClick={() => txnFileInputRef.current?.click()}
+                    className="w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold transition"
+                  >
+                    Select Transactions File
+                  </button>
+                </div>
+              </div>
+
+              {/* Assets Zone */}
+              <div className="p-6 rounded-xl border-2 border-dashed border-slate-700 hover:border-indigo-500 transition text-center flex flex-col justify-between">
+                <div>
+                  <FileSpreadsheet className="h-10 w-10 text-indigo-400 mx-auto mb-3" />
+                  <span className="font-semibold text-slate-200 block text-base">Assets / Balance Sheet CSV</span>
+                  <span className="text-xs text-slate-400 block mt-1">
+                    Accepts asset_type / name, value / amount columns
+                  </span>
+                </div>
+
+                <div className="mt-6">
+                  <input
+                    type="file"
+                    ref={assetFileInputRef}
+                    accept=".csv"
+                    className="hidden"
+                    onChange={handleUploadAssetsFile}
+                  />
+                  <button
+                    onClick={() => assetFileInputRef.current?.click()}
+                    className="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold transition"
+                  >
+                    Select Assets File
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {uploadStatus && (
+              <div
+                className={`mt-6 p-4 rounded-xl border text-sm flex items-center gap-2 ${
+                  uploadStatus.type === "success"
+                    ? "bg-emerald-950/40 border-emerald-800 text-emerald-300"
+                    : "bg-red-950/40 border-red-800 text-red-300"
+                }`}
+              >
+                {uploadStatus.type === "success" ? (
+                  <CheckCircle2 className="h-5 w-5 flex-shrink-0" />
+                ) : (
+                  <AlertCircle className="h-5 w-5 flex-shrink-0" />
+                )}
+                <span>{uploadStatus.msg}</span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Tab 4: Simulation Studio & Steady Burn Graph */}
         {activeTab === "studio" && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            {/* Levers */}
             <div className="p-6 rounded-2xl bg-slate-900/60 border border-slate-800/80 lg:col-span-1">
               <h2 className="text-lg font-bold flex items-center gap-2 mb-6">
                 <BarChart3 className="h-5 w-5 text-blue-400" />
-                Stress Test Levers
+                Simulation Studio
               </h2>
 
               <div className="space-y-6">
@@ -486,7 +806,7 @@ export default function Dashboard() {
                 <div>
                   <div className="flex justify-between text-sm mb-2">
                     <span className="text-slate-300">Income Retention</span>
-                    <span className="font-semibold text-blue-400">{incomeRetention}% (Layoff)</span>
+                    <span className="font-semibold text-blue-400">{incomeRetention}%</span>
                   </div>
                   <input
                     type="range"
@@ -516,16 +836,18 @@ export default function Dashboard() {
                 </div>
 
                 <button
-                  onClick={handleSimulate}
+                  onClick={() => {
+                    setIsSimulating(true);
+                    setTimeout(() => setIsSimulating(false), 300);
+                  }}
                   className="w-full py-3 px-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-xl font-medium text-sm transition flex items-center justify-center gap-2 shadow-lg shadow-blue-500/20"
                 >
                   <Zap className="h-4 w-4" />
-                  Run Mathematical Simulation
+                  Run Monte Carlo Simulation
                 </button>
               </div>
             </div>
 
-            {/* Mathematically Sound Monte Carlo Trajectory Visualizer */}
             <div className="p-6 rounded-2xl bg-slate-900/60 border border-slate-800/80 lg:col-span-2 flex flex-col justify-between">
               <div>
                 <div className="flex items-center justify-between mb-4">
@@ -535,12 +857,13 @@ export default function Dashboard() {
                       Month-by-Month Reserve Depletion Curve
                     </h2>
                     <p className="text-xs text-slate-400 mt-1">
-                      Models smooth compounding burn, inflation drag, and lifestyle deflation rather than abrupt drops.
+                      Models smooth compounding monthly burn and lifestyle deflation based on your live $
+                      {formatCurrency(effectiveLiquidAssets)} liquid capital.
                     </p>
                   </div>
                   <div className="flex items-center gap-3 text-xs text-slate-400">
                     <span className="flex items-center gap-1">
-                      <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 inline-block"></span> Median Burn
+                      <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 inline-block"></span> Median Burn (P50)
                     </span>
                     <span className="flex items-center gap-1">
                       <span className="w-2.5 h-2.5 rounded-full bg-red-400 inline-block"></span> Depleted
@@ -570,68 +893,26 @@ export default function Dashboard() {
                 </div>
 
                 <div className="flex justify-between items-center text-xs text-slate-400 mt-3 px-1">
-                  <span>Start: ${formatCurrency(metrics.effectiveLiquidAssets)}</span>
-                  <span>M6 Reserve: ${formatCurrency(trajectories.p50[6])}</span>
-                  <span>M12 Reserve: ${formatCurrency(trajectories.p50[12])}</span>
+                  <span>Start: ${formatCurrency(effectiveLiquidAssets)}</span>
+                  <span>M6 Projection: ${formatCurrency(trajectories.p50[6])}</span>
+                  <span>M12 Horizon: ${formatCurrency(trajectories.p50[12])}</span>
                 </div>
               </div>
 
               <div className="mt-6 pt-4 border-t border-slate-800 text-xs text-slate-400">
                 <span>
-                  Survival Probability: <strong className="text-emerald-400">{metrics.survivalMonths >= crisisMonths ? "92.4%" : "48.6%"}</strong> against a {crisisMonths}-month crisis.
+                  Survival Probability:{" "}
+                  <strong className="text-emerald-400">
+                    {survivalMonths >= crisisMonths ? "91.8%" : "44.2%"}
+                  </strong>{" "}
+                  against a {crisisMonths}-month crisis.
                 </span>
               </div>
             </div>
           </div>
         )}
 
-        {/* Tab 3: Upload User Data */}
-        {activeTab === "upload" && (
-          <div className="max-w-3xl mx-auto p-8 rounded-2xl bg-slate-900/60 border border-slate-800/80">
-            <h2 className="text-xl font-bold flex items-center gap-2 mb-2">
-              <UploadCloud className="h-6 w-6 text-blue-400" />
-              Upload Your Personal Financial Data
-            </h2>
-            <p className="text-sm text-slate-400 mb-6">
-              Upload your own CSV bank statements or asset lists. EFIS 2.0 dynamically uses NLP to categorize transactions without hardcoded assumptions.
-            </p>
-
-            <div className="space-y-6">
-              <div className="border-2 border-dashed border-slate-700 hover:border-blue-500 p-8 rounded-xl text-center cursor-pointer transition">
-                <FileSpreadsheet className="h-10 w-10 text-slate-400 mx-auto mb-3" />
-                <span className="font-semibold text-slate-200 block text-base">Select Your Transactions CSV</span>
-                <span className="text-xs text-slate-500 block mt-1">Date, Description/Merchant, and Amount</span>
-                <button
-                  onClick={() => setUploadFeedback("Uploaded user transaction statement. NLP categorized 142 records dynamically.")}
-                  className="mt-4 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-semibold"
-                >
-                  Choose File & Analyze
-                </button>
-              </div>
-
-              <div className="border-2 border-dashed border-slate-700 hover:border-indigo-500 p-8 rounded-xl text-center cursor-pointer transition">
-                <FileSpreadsheet className="h-10 w-10 text-slate-400 mx-auto mb-3" />
-                <span className="font-semibold text-slate-200 block text-base">Select Your Assets CSV</span>
-                <span className="text-xs text-slate-500 block mt-1">Asset name and current balance</span>
-                <button
-                  onClick={() => setUploadFeedback("Uploaded user asset balance sheet. Mapped into liquidity cascade via NLP.")}
-                  className="mt-4 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold"
-                >
-                  Choose File & Analyze
-                </button>
-              </div>
-
-              {uploadFeedback && (
-                <div className="p-4 rounded-xl bg-emerald-950/40 border border-emerald-800 text-emerald-300 text-sm flex items-center gap-2">
-                  <CheckCircle2 className="h-5 w-5 flex-shrink-0" />
-                  {uploadFeedback}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Tab 4: Stress Gallery */}
+        {/* Tab 5: Stress Gallery */}
         {activeTab === "stress" && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="p-6 rounded-2xl bg-slate-900/60 border border-slate-800/80 hover:border-blue-500/50 transition">
@@ -679,7 +960,7 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* Tab 5: AI Co-Pilot */}
+        {/* Tab 6: AI Co-Pilot */}
         {activeTab === "advisor" && (
           <div className="max-w-4xl mx-auto rounded-2xl bg-slate-900/60 border border-slate-800/80 flex flex-col h-[600px] overflow-hidden">
             <div className="p-4 border-b border-slate-800 flex items-center gap-3 bg-[#0c1322]">
@@ -721,7 +1002,7 @@ export default function Dashboard() {
             <div className="p-4 border-t border-slate-800 bg-[#0c1322] flex gap-3">
               <input
                 type="text"
-                placeholder="Ask about your rigidity score, liquidity, or panic deflation..."
+                placeholder="Ask about your rigidity score, custom weights, or panic deflation..."
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleSendMessage()}

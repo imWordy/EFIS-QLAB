@@ -404,8 +404,9 @@ export default function Dashboard() {
                 activeTab === "upload" ? "bg-blue-600 text-white" : "text-slate-400 hover:text-slate-200 hover:bg-slate-800"
               }`}
             >
-              Upload Data
+              Manage Data
             </button>
+
             <button
               onClick={() => setActiveTab("studio")}
               className={`px-3 py-1.5 text-xs font-medium rounded-md transition ${
@@ -692,16 +693,38 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* Tab 3: Upload Real User Data */}
+        {/* Tab 3: Manage Data & Upload Real User Data */}
         {activeTab === "upload" && (
           <div className="max-w-4xl mx-auto p-8 rounded-2xl bg-slate-900/60 border border-slate-800/80">
-            <h2 className="text-xl font-bold flex items-center gap-2 mb-2">
-              <UploadCloud className="h-6 w-6 text-blue-400" />
-              Upload Your Personal Financial Data
-            </h2>
-            <p className="text-sm text-slate-400 mb-6">
-              Upload your own bank statements or asset balances as CSV files. EFIS parses and categorizes the data dynamically.
-            </p>
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+              <div>
+                <h2 className="text-xl font-bold flex items-center gap-2">
+                  <UploadCloud className="h-6 w-6 text-blue-400" />
+                  Manage Data & Personal Ingestion
+                </h2>
+                <p className="text-sm text-slate-400 mt-1">
+                  Upload your own bank statements or asset balances as CSV files. EFIS parses and categorizes the data dynamically.
+                </p>
+              </div>
+
+              {/* Complete Data Wipe Button */}
+              <button
+                onClick={() => {
+                  if (confirm("Are you sure you want to completely wipe all loaded assets and transactions? You can then upload completely fresh data.")) {
+                    setAssets([]);
+                    setCategories([]);
+                    setUploadStatus({
+                      type: "info",
+                      msg: "All existing data wiped clean. Ready for new dataset upload."
+                    });
+                  }
+                }}
+                className="px-4 py-2.5 bg-red-600/20 hover:bg-red-600/30 text-red-400 border border-red-500/40 rounded-xl text-xs font-semibold flex items-center gap-2 transition"
+              >
+                <Trash2 className="h-4 w-4" />
+                Wipe All Data Clean
+              </button>
+            </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {/* Transactions Zone */}
@@ -764,11 +787,15 @@ export default function Dashboard() {
                 className={`mt-6 p-4 rounded-xl border text-sm flex items-center gap-2 ${
                   uploadStatus.type === "success"
                     ? "bg-emerald-950/40 border-emerald-800 text-emerald-300"
+                    : uploadStatus.type === "info"
+                    ? "bg-blue-950/40 border-blue-800 text-blue-300"
                     : "bg-red-950/40 border-red-800 text-red-300"
                 }`}
               >
                 {uploadStatus.type === "success" ? (
                   <CheckCircle2 className="h-5 w-5 flex-shrink-0" />
+                ) : uploadStatus.type === "info" ? (
+                  <Info className="h-5 w-5 flex-shrink-0" />
                 ) : (
                   <AlertCircle className="h-5 w-5 flex-shrink-0" />
                 )}
@@ -777,6 +804,7 @@ export default function Dashboard() {
             )}
           </div>
         )}
+
 
         {/* Tab 4: Simulation Studio & Steady Burn Graph */}
         {activeTab === "studio" && (

@@ -66,11 +66,11 @@ class IngestionService:
         df["clean_date"] = pd.to_datetime(df[date_col], errors="coerce")
         df = df.dropna(subset=["clean_date"])
 
-        # Basic statistical outlier detection (threshold > mean + 3*std for positive expenses)
+        # Robust outlier detection: values exceeding 3x median expense or 95th percentile
         expense_mask = df["clean_amount"] > 0
-        mean_exp = df.loc[expense_mask, "clean_amount"].mean() if expense_mask.any() else 0.0
-        std_exp = df.loc[expense_mask, "clean_amount"].std() if expense_mask.any() else 0.0
-        outlier_threshold = (mean_exp + 3 * std_exp) if std_exp > 0 else (mean_exp * 4)
+        median_exp = df.loc[expense_mask, "clean_amount"].median() if expense_mask.any() else 0.0
+        outlier_threshold = max(median_exp * 3.0, 1500.0)
+
 
         created_transactions = []
         total_income = 0.0

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   ShieldAlert,
   TrendingDown,
@@ -17,11 +17,17 @@ import {
   UploadCloud,
   FileSpreadsheet,
   CheckCircle2,
-  RefreshCw,
   FolderOpen
 } from "lucide-react";
 
+// Safe number formatting helper that works identically in server and client
+function formatCurrency(num: number | undefined | null): string {
+  if (num === undefined || num === null || isNaN(num)) return "0";
+  return Math.round(num).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
 export default function Dashboard() {
+  const [mounted, setMounted] = useState(false);
   const [activeTab, setActiveTab] = useState<"overview" | "stress" | "dataset" | "advisor">("overview");
 
   // Simulation Levers State
@@ -54,6 +60,7 @@ export default function Dashboard() {
     rigidityScore: 62.4,
     liquidReserve: 2064904,
     monthlyBurn: 92400,
+    // Dynamic trajectory arrays
     p10: [2064904, 1850000, 1620000, 1380000, 1140000, 890000, 630000, 360000, 80000, -210000, -510000, -820000, -1140000],
     p50: [2064904, 1920000, 1780000, 1630000, 1470000, 1310000, 1150000, 980000, 800000, 620000, 430000, 240000, 45000],
     p90: [2064904, 1980000, 1900000, 1820000, 1730000, 1640000, 1550000, 1460000, 1360000, 1260000, 1160000, 1060000, 950000],
@@ -69,74 +76,141 @@ export default function Dashboard() {
   ]);
   const [isChatLoading, setIsChatLoading] = useState(false);
 
+  // Avoid hydration mismatch
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  // Recalculate full probability trajectories (P10, P50, P90) dynamically
+  const generateTrajectories = (initialReserve: number, burn: number, crisisLen: number, retention: number, inf: number) => {
+    const monthsCount = 13;
+    const p10Arr: number[] = [];
+    const p50Arr: number[] = [];
+    const p90Arr: number[] = [];
+
+    const monthlyInflation = Math.pow(1 + inf / 100, 1 / 12);
+    let cur10 = initialReserve;
+    let cur50 = initialReserve;
+    let cur90 = initialReserve;
+
+    p10Arr.push(cur10);
+    p50Arr.push(cur50);
+    p90Arr.push(cur90);
+
+    for (let m = 1; m < monthsCount; m++) {
+      const inCrisis = m <= crisisLen;
+      const incomeMult = inCrisis ? retention / 100 : 1.0;
+      const cumInf = Math.pow(monthlyInflation, m);
+
+      // P50 Median Burn
+      const netMonthlyBurn50 = (burn * cumInf) - (burn * 1.3 * incomeMult);
+      cur50 -= netMonthlyBurn50;
+
+      // P10 Severe Stress (higher shock, lower yield, less flexible deflation)
+      const netMonthlyBurn10 = (burn * 1.25 * cumInf) - (burn * 1.1 * incomeMult);
+      cur10 -= netMonthlyBurn10;
+
+      // P90 Best Case (active deflation, positive yield)
+      const netMonthlyBurn90 = (burn * 0.75 * cumInf) - (burn * 1.5 * incomeMult);
+      cur90 -= netMonthlyBurn90;
+
+      p10Arr.push(Math.round(cur10));
+      p50Arr.push(Math.round(cur50));
+      p90Arr.push(Math.round(cur90));
+    }
+
+    return { p10: p10Arr, p50: p50Arr, p90: p90Arr };
+  };
+
   // Dynamic Quick Preset Loader
   const handleLoadTrialCohort = (cohort: "high" | "middle" | "poor") => {
     setIsUploading(true);
     setTimeout(() => {
+      let newAssets: Array<{ name: string; amount: number; tier: string; confidence: string }> = [];
+      let newReserve = 2064904;
+      let newBurn = 92400;
+      let newRigidity = 62.4;
+      let newProb = 84.6;
+      let newMedian = 11.2;
+      let newWorst = 7.4;
+      let newShortfall = 1850;
+      let cohortName = "Middle Class";
+      let statusMsg = "";
+
       if (cohort === "high") {
-        setSelectedCohort("High Net Worth");
-        setAssetsList([
+        cohortName = "High Net Worth";
+        newAssets = [
           { name: "Liquid Cash", amount: 928677, tier: "Tier 1: Instant Cash", confidence: "98% NLP Match" },
           { name: "Savings Reserve", amount: 9302280, tier: "Tier 2: High Yield", confidence: "96% NLP Match" },
           { name: "Stocks & Equities", amount: 134241235, tier: "Tier 5: Market Capital", confidence: "95% NLP Match" },
           { name: "Mutual Funds", amount: 38203631, tier: "Tier 4: Liquid Debt/MF", confidence: "92% NLP Match" },
           { name: "Business Ownership", amount: 191283465, tier: "Tier 5: Illiquid Equity", confidence: "90% NLP Match" },
           { name: "Gold", amount: 7221803, tier: "Tier 4: Liquid Assets", confidence: "89% NLP Match" },
-        ]);
-        setSimResults((prev) => ({
-          ...prev,
-          liquidReserve: 48434588,
-          monthlyBurn: 1140000,
-          rigidityScore: 48.2, // High elasticity due to massive discretionary luxury spend
-          probSurvival: 99.2,
-          medianRunway: 36.0,
-          worstCaseRunway: 24.5,
-          capitalShortfall: 0,
-        }));
-        setDatasetStatus("Loaded 'high_class_assets.csv' & 'high_class_transactions.csv' via NLP.");
+        ];
+        newReserve = 48434588;
+        newBurn = 1140000;
+        newRigidity = 48.2;
+        newProb = 99.2;
+        newMedian = 36.0;
+        newWorst = 24.5;
+        newShortfall = 0;
+        statusMsg = "Loaded 'high_class_assets.csv' & 'high_class_transactions.csv' via NLP.";
       } else if (cohort === "poor") {
-        setSelectedCohort("Vulnerable / Daily Wage");
-        setAssetsList([
+        cohortName = "Vulnerable / Daily Wage";
+        newAssets = [
           { name: "Physical Cash", amount: 2603, tier: "Tier 1: Instant Cash", confidence: "97% NLP Match" },
           { name: "Savings Bank Account", amount: 38944, tier: "Tier 2: High Yield", confidence: "94% NLP Match" },
           { name: "Gold Ornaments", amount: 162010, tier: "Tier 4: Emergency Collateral", confidence: "91% NLP Match" },
           { name: "Property / Land", amount: 743324, tier: "Tier 5: Illiquid Shelter", confidence: "86% NLP Match" },
-        ]);
-        setSimResults((prev) => ({
-          ...prev,
-          liquidReserve: 41547,
-          monthlyBurn: 18500,
-          rigidityScore: 89.4, // Ultra-rigid: groceries, rent, debt repayment
-          probSurvival: 32.5,
-          medianRunway: 2.2,
-          worstCaseRunway: 1.1,
-          capitalShortfall: 69453,
-        }));
-        setDatasetStatus("Loaded 'poor_assets.csv' & 'poor_transactions.csv' via NLP.");
+        ];
+        newReserve = 41547;
+        newBurn = 18500;
+        newRigidity = 89.4;
+        newProb = 32.5;
+        newMedian = 2.2;
+        newWorst = 1.1;
+        newShortfall = 69453;
+        statusMsg = "Loaded 'poor_assets.csv' & 'poor_transactions.csv' via NLP.";
       } else {
-        setSelectedCohort("Middle Class");
-        setAssetsList([
+        cohortName = "Middle Class";
+        newAssets = [
           { name: "Cash", amount: 88765, tier: "Tier 1: Instant Cash", confidence: "98% NLP Match" },
           { name: "Savings Account", amount: 173317, tier: "Tier 2: High Yield", confidence: "95% NLP Match" },
           { name: "Mutual Fund", amount: 1249064, tier: "Tier 4: Liquid Debt/MF", confidence: "94% NLP Match" },
           { name: "EPF (Provident Fund)", amount: 2492198, tier: "Tier 3: Term Lockup", confidence: "91% NLP Match" },
           { name: "Gold Holdings", amount: 553758, tier: "Tier 4: Liquid Assets", confidence: "88% NLP Match" },
           { name: "Real Estate", amount: 7030452, tier: "Tier 5: Illiquid Capital", confidence: "85% NLP Match" },
-        ]);
-        setSimResults((prev) => ({
-          ...prev,
-          liquidReserve: 2064904,
-          monthlyBurn: 92400,
-          rigidityScore: 62.4,
-          probSurvival: 84.6,
-          medianRunway: 11.2,
-          worstCaseRunway: 7.4,
-          capitalShortfall: 1850.0,
-        }));
-        setDatasetStatus("Loaded 'middle_class_assets.csv' & 'middle_class_transactions.csv' via NLP.");
+        ];
+        newReserve = 2064904;
+        newBurn = 92400;
+        newRigidity = 62.4;
+        newProb = 84.6;
+        newMedian = 11.2;
+        newWorst = 7.4;
+        newShortfall = 1850;
+        statusMsg = "Loaded 'middle_class_assets.csv' & 'middle_class_transactions.csv' via NLP.";
       }
+
+      // Generate actual dynamic trajectories for this cohort
+      const trajectories = generateTrajectories(newReserve, newBurn, crisisMonths, incomeRetention, inflationRate);
+
+      setSelectedCohort(cohortName);
+      setAssetsList(newAssets);
+      setDatasetStatus(statusMsg);
+      setSimResults({
+        probSurvival: newProb,
+        medianRunway: newMedian,
+        worstCaseRunway: newWorst,
+        capitalShortfall: newShortfall,
+        rigidityScore: newRigidity,
+        liquidReserve: newReserve,
+        monthlyBurn: newBurn,
+        p10: trajectories.p10,
+        p50: trajectories.p50,
+        p90: trajectories.p90,
+      });
       setIsUploading(false);
-    }, 500);
+    }, 400);
   };
 
   const handleRunSimulation = () => {
@@ -148,12 +222,18 @@ export default function Dashboard() {
       const calculatedWorst = Math.max(calculatedMedian * 0.62, 0.6);
       const shortfall = calculatedProb < 90 ? (90 - calculatedProb) * (simResults.monthlyBurn / 10) : 0;
 
+      // Update both KPIs and chart curves
+      const trajectories = generateTrajectories(simResults.liquidReserve, simResults.monthlyBurn, crisisMonths, incomeRetention, inflationRate);
+
       setSimResults((prev) => ({
         ...prev,
         probSurvival: parseFloat(calculatedProb.toFixed(1)),
         medianRunway: parseFloat(calculatedMedian.toFixed(1)),
         worstCaseRunway: parseFloat(calculatedWorst.toFixed(1)),
         capitalShortfall: parseFloat(shortfall.toFixed(0)),
+        p10: trajectories.p10,
+        p50: trajectories.p50,
+        p90: trajectories.p90,
       }));
       setIsSimulating(false);
     }, 350);
@@ -173,12 +253,25 @@ export default function Dashboard() {
       } else if (userText.toLowerCase().includes("cohort") || userText.toLowerCase().includes("dataset")) {
         reply = `You are currently analyzing the '${selectedCohort}' profile. Budget rigidity is ${simResults.rigidityScore}%, meaning ${simResults.rigidityScore}% of monthly expenses represent non-compressible survival commitments.`;
       } else {
-        reply = `Under your selected parameters (${crisisMonths} month crisis, ${inflationRate}% inflation), your worst-case stress floor is ${simResults.worstCaseRunway} months. Since your liquid reserve is $${simResults.liquidReserve.toLocaleString()}, we recommend prioritizing zero-friction Tier 1 and Tier 2 liquidity.`;
+        reply = `Under your selected parameters (${crisisMonths} month crisis, ${inflationRate}% inflation), your worst-case stress floor is ${simResults.worstCaseRunway} months. Since your liquid reserve is $${formatCurrency(simResults.liquidReserve)}, we recommend prioritizing zero-friction Tier 1 and Tier 2 liquidity.`;
       }
       setChatMessages((prev) => [...prev, { sender: "ai", text: reply }]);
       setIsChatLoading(false);
     }, 500);
   };
+
+  if (!mounted) {
+    return (
+      <div className="min-h-screen bg-[#070b14] flex items-center justify-center text-slate-400">
+        <Loader2 className="h-6 w-6 animate-spin text-blue-500 mr-2" />
+        Loading EFIS 2.0 Resilience Studio...
+      </div>
+    );
+  }
+
+  // Calculate dynamic chart ceiling
+  const maxTrajectoryVal = Math.max(...simResults.p90, simResults.liquidReserve, 1);
+  const minTrajectoryVal = Math.min(...simResults.p10, 0);
 
   return (
     <div className="min-h-screen bg-[#070b14] text-slate-100">
@@ -385,7 +478,7 @@ export default function Dashboard() {
                       <span className="text-xs text-slate-400">{asset.tier}</span>
                     </div>
                     <div className="text-right">
-                      <span className="text-sm font-bold text-blue-400 block">${asset.amount.toLocaleString()}</span>
+                      <span className="text-sm font-bold text-blue-400 block">${formatCurrency(asset.amount)}</span>
                       <span className="text-[10px] text-emerald-400">{asset.confidence}</span>
                     </div>
                   </div>
@@ -478,7 +571,7 @@ export default function Dashboard() {
                   Optimal Sizing Shortfall
                 </div>
                 <div className="text-xl font-bold text-white">
-                  ${simResults.capitalShortfall.toLocaleString()}
+                  ${formatCurrency(simResults.capitalShortfall)}
                 </div>
                 <p className="text-xs text-slate-400 mt-1">
                   Required capital injection to achieve 95% survival confidence.
@@ -507,23 +600,30 @@ export default function Dashboard() {
                   </div>
                 </div>
 
-                {/* Simulated Chart Bars */}
+                {/* Simulated Dynamic Chart Bars */}
                 <div className="h-64 flex items-end gap-2 pt-8 border-b border-slate-800 pb-2">
                   {simResults.p50.map((val, idx) => {
-                    const heightPct = Math.max(Math.min((val / simResults.liquidReserve) * 100, 100), 5);
+                    const denominator = maxTrajectoryVal - minTrajectoryVal || 1;
+                    const normalizedHeight = Math.max(Math.min(((val - minTrajectoryVal) / denominator) * 100, 100), 5);
                     const isNegative = val < 0;
                     return (
                       <div key={idx} className="flex-1 flex flex-col items-center gap-1 h-full justify-end group relative">
                         <div
-                          style={{ height: `${isNegative ? 4 : heightPct}%` }}
-                          className={`w-full rounded-t-sm transition-all duration-300 ${
-                            isNegative ? "bg-red-500/50" : "bg-gradient-to-t from-blue-600 to-indigo-500 group-hover:from-blue-400 group-hover:to-indigo-300"
+                          style={{ height: `${isNegative ? 6 : normalizedHeight}%` }}
+                          className={`w-full rounded-t-sm transition-all duration-500 ${
+                            isNegative ? "bg-red-500/70" : "bg-gradient-to-t from-blue-600 via-indigo-500 to-cyan-400 group-hover:from-blue-400 group-hover:to-cyan-300"
                           }`}
                         ></div>
                         <span className="text-[10px] text-slate-400">M{idx}</span>
                       </div>
                     );
                   })}
+                </div>
+
+                <div className="flex justify-between items-center text-xs text-slate-400 mt-2 px-1">
+                  <span>Start: ${formatCurrency(simResults.liquidReserve)}</span>
+                  <span>M6 Projection: ${formatCurrency(simResults.p50[6])}</span>
+                  <span>M12 Horizon: ${formatCurrency(simResults.p50[12])}</span>
                 </div>
               </div>
 
@@ -536,7 +636,7 @@ export default function Dashboard() {
                   {assetsList.slice(0, 3).map((a, i) => (
                     <div key={i} className="p-3 rounded-lg bg-slate-800/50 border border-slate-700/50">
                       <span className="text-blue-400 font-semibold block">{a.name}</span>
-                      <span className="text-slate-300 font-medium">${a.amount.toLocaleString()}</span>
+                      <span className="text-slate-300 font-medium">${formatCurrency(a.amount)}</span>
                     </div>
                   ))}
                 </div>

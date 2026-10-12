@@ -105,3 +105,35 @@ async def test_full_phase_1_and_2_integration():
         forecast_data = res_forecast.json()
         assert len(forecast_data["projected_curve"]) == 6
         assert forecast_data["model_used"] in ["WEIGHTED_MOVING_AVERAGE", "HOLT_LINEAR_EXPONENTIAL_SMOOTHING", "SEASONAL_TREND_DECOMPOSITION_AUTOREGRESSIVE"]
+
+        # 8. Run Vectorized Monte Carlo Simulation (Phase 3 Integration)
+        sim_payload = {
+            "crisis_duration_months": 6,
+            "income_retention_pct": 0.0,
+            "inflation_rate_pct": 4.5,
+            "investment_yield_pct": 4.0,
+            "target_survival_months": 12,
+            "num_simulations": 1000,
+            "max_deflation_pct": 80.0,
+            "panic_runway_threshold_months": 3.0
+        }
+        res_sim = await ac.post("/api/v1/simulation/run", json=sim_payload, headers=headers)
+        assert res_sim.status_code == 200, res_sim.text
+        sim_data = res_sim.json()
+        assert "prob_surviving_target" in sim_data
+        assert "timelines" in sim_data
+        assert len(sim_data["timelines"]["p50_median"]) == 13
+        assert sim_data["user_baseline"]["total_liquid_assets"] == 20000.0  # 5000 + 15000
+
+        # 9. Test Multi-Tier Liquidation Cascade (Phase 3 Integration)
+        cascade_payload = {
+            "cash_needed": 8000.0
+        }
+        res_cascade = await ac.post("/api/v1/simulation/liquidation-cascade", json=cascade_payload, headers=headers)
+        assert res_cascade.status_code == 200, res_cascade.text
+        cascade_data = res_cascade.json()
+        assert cascade_data["deficit_remaining"] == 0.0
+        assert cascade_data["is_exhausted"] is False
+        assert len(cascade_data["liquidations"]) >= 1
+        assert cascade_data["total_liquid_remaining"] == 12000.0  # 20000 - 8000
+

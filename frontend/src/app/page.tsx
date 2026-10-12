@@ -141,6 +141,8 @@ export default function Dashboard() {
           return;
         }
 
+        const dateIdx = headers.findIndex((h) => h.includes("date") || h.includes("time") || h.includes("day"));
+        const uniqueMonthKeys = new Set<string>();
         const categoryMap: { [key: string]: { total: number; count: number } } = {};
         let parsedRows = 0;
 
@@ -152,7 +154,17 @@ export default function Dashboard() {
           const desc = cols[descIdx].replace(/_/g, " ").trim();
           const rowType = typeIdx !== -1 ? cols[typeIdx].toLowerCase() : "";
 
-          // Skip credits or positive incomes
+          // Extract date to calculate months duration
+          if (dateIdx !== -1 && cols[dateIdx]) {
+            const rawDate = cols[dateIdx].trim();
+            // Expected format YYYY-MM-DD or MM/DD/YYYY
+            const monthPart = rawDate.slice(0, 7); // e.g. 2021-11
+            if (monthPart.length >= 6) {
+              uniqueMonthKeys.add(monthPart);
+            }
+          }
+
+          // Skip credits or explicit income rows
           if (rowType.includes("income") || (!isNaN(rawAmt) && rawAmt > 0 && desc.toLowerCase().includes("salary"))) {
             continue;
           }
@@ -166,7 +178,10 @@ export default function Dashboard() {
           }
         }
 
-        // Convert to new category state with dynamic semantic classification
+        // True number of months represented in this dataset (minimum 1)
+        const totalMonthsCovered = Math.max(uniqueMonthKeys.size, 1);
+
+        // Convert total cumulative expense into TRUE AVERAGE MONTHLY EXPENSE per category
         const newCats = Object.keys(categoryMap).map((catName) => {
           const lower = catName.toLowerCase();
           const isEssential =
@@ -186,9 +201,12 @@ export default function Dashboard() {
             lower.includes("school") ||
             lower.includes("fuel");
 
+          // Average monthly burn for this category
+          const monthlyCategoryAverage = Math.round(categoryMap[catName].total / totalMonthsCovered);
+
           return {
             name: catName.charAt(0).toUpperCase() + catName.slice(1),
-            total: Math.round(categoryMap[catName].total),
+            total: monthlyCategoryAverage,
             type: (isEssential ? "ESSENTIAL" : "FLEXIBLE") as "ESSENTIAL" | "FLEXIBLE",
           };
         });
@@ -197,7 +215,7 @@ export default function Dashboard() {
           setCategories(newCats.sort((a, b) => b.total - a.total));
           setUploadStatus({
             type: "success",
-            msg: `Successfully imported ${parsedRows} transactions across ${newCats.length} categories! Dashboard metrics updated dynamically.`,
+            msg: `Successfully imported ${parsedRows} transactions across ${totalMonthsCovered} months! Monthly averages and survival runway normalized.`,
           });
           setActiveTab("dashboard");
         } else {
@@ -206,6 +224,7 @@ export default function Dashboard() {
       } catch (err: any) {
         setUploadStatus({ type: "error", msg: "Error parsing CSV: " + err.message });
       }
+
     };
     reader.readAsText(file);
   };

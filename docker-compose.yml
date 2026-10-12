@@ -1,0 +1,85 @@
+version: '3.8'
+
+services:
+  # 1. FastAPI Core Backend
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: efis-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://efis_user:efis_password@postgres:5432/efis_db
+      - SECRET_KEY=efis-2.0-production-ultra-secure-key-2026
+      - BACKEND_CORS_ORIGINS=["http://localhost:3000","http://127.0.0.1:3000"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - efis-net
+    restart: unless-stopped
+
+  # 2. Next.js 15 Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: efis-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
+    depends_on:
+      - backend
+    networks:
+      - efis-net
+    restart: unless-stopped
+
+  # 3. PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: efis-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=efis_user
+      - POSTGRES_PASSWORD=efis_password
+      - POSTGRES_DB=efis_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U efis_user -d efis_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - efis-net
+    restart: unless-stopped
+
+  # 4. Redis Cache & Queue
+  redis:
+    image: redis:7-alpine
+    container_name: efis-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - efis-net
+    restart: unless-stopped
+
+networks:
+  efis-net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:

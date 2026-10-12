@@ -137,3 +137,31 @@ async def test_full_phase_1_and_2_integration():
         assert len(cascade_data["liquidations"]) >= 1
         assert cascade_data["total_liquid_remaining"] == 12000.0  # 20000 - 8000
 
+        # 10. Test Stress Test Gallery Listing & Execution (Phase 4 Integration)
+        res_scenarios = await ac.get("/api/v1/advisor/scenarios")
+        assert res_scenarios.status_code == 200
+        scenarios_list = res_scenarios.json()
+        assert len(scenarios_list) >= 4
+
+        scenario_run_payload = {
+            "scenario_id": "tech_layoff",
+            "target_survival_months": 12
+        }
+        res_run_scenario = await ac.post("/api/v1/advisor/scenarios/run", json=scenario_run_payload, headers=headers)
+        assert res_run_scenario.status_code == 200, res_run_scenario.text
+        scenario_run_data = res_run_scenario.json()
+        assert scenario_run_data["scenario"]["id"] == "tech_layoff"
+        assert "prob_surviving_target" in scenario_run_data
+
+        # 11. Test AI Advisor Chat / Guidance Synthesis (Phase 4 Integration)
+        advice_payload = {
+            "user_question": "What happens if I face an 8-month layoff?"
+        }
+        res_advice = await ac.post("/api/v1/advisor/chat", json=advice_payload, headers=headers)
+        assert res_advice.status_code == 200, res_advice.text
+        advice_data = res_advice.json()
+        assert advice_data["verdict"] == "ANALYSIS_COMPLETE"
+        assert len(advice_data["summary"]) > 50
+        assert "key_metrics" in advice_data
+
+

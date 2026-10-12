@@ -314,15 +314,22 @@ export default function Dashboard() {
     reader.readAsText(file);
   };
 
-  // --- Dynamic Simulation Trajectory Engine ---
-  // Models steady month-by-month burn with compound inflation and behavioral spend contraction
+  // --- Original EFIS Simulation Engine Math Alignment ---
+  // Replicating exactly simulate_scenario & simulate_monte_carlo from EFIS 1.0:
+  // 1. Yield factor on positive assets: (1 + 0.045)^(1/12)
+  // 2. Compounding monthly inflation factor: (1 + inflation_rate/100)^(1/12)
+  // 3. Panic Mode Lifestyle Deflation: If runway < 3 months or assets <= 0: Flexible expenses *= 0.2 (cuts 80%)
+  // 4. Net Cashflow = Income(m) - Expenses(m)
+  // 5. Assets(m) = Assets(m-1) * yield + Net Cashflow
   const calculateTrajectories = () => {
     const horizon = 12;
     const p10Arr: number[] = [];
     const p50Arr: number[] = [];
     const p90Arr: number[] = [];
 
-    const monthlyInf = Math.pow(1 + inflationRate / 100, 1 / 12);
+    const monthlyYieldFactor = Math.pow(1 + 0.045, 1 / 12);
+    const monthlyInf = Math.pow(1 + Math.max(0, inflationRate) / 100, 1 / 12);
+
     let bal10 = effectiveLiquidAssets;
     let bal50 = effectiveLiquidAssets;
     let bal90 = effectiveLiquidAssets;
@@ -331,25 +338,56 @@ export default function Dashboard() {
     p50Arr.push(bal50);
     p90Arr.push(bal90);
 
+    let accumInf = 1.0;
+
     for (let m = 1; m <= horizon; m++) {
+      accumInf *= monthlyInf;
+
+      // Yield application (from original EFIS: assets > 0 multiplies by yield factor)
+      if (bal50 > 0) bal50 *= monthlyYieldFactor;
+      if (bal10 > 0) bal10 *= Math.pow(1 + 0.02, 1 / 12); // stressed yield
+      if (bal90 > 0) bal90 *= Math.pow(1 + 0.06, 1 / 12); // optimistic yield
+
       const inCrisis = m <= crisisMonths;
-      const infMult = Math.pow(monthlyInf, m);
-      const monthlyRetainedIncome = inCrisis ? (totalMonthlyExpense * 1.3 * (incomeRetention / 100)) : (totalMonthlyExpense * 1.3);
+      // Normal income is calibrated to cover normal expenses + 20% savings buffer
+      const normalMonthlyIncome = totalMonthlyExpense * 1.2;
+      const currentIncome = inCrisis ? normalMonthlyIncome * (incomeRetention / 100) : normalMonthlyIncome;
 
-      // P50 Median Burn (Deflates flexible spending by 50% if runway is under 3.5 months)
-      const runway50 = bal50 / (totalMonthlyExpense * infMult);
-      const deflation50 = runway50 < 3.5 ? 0.6 : 0.0;
-      const burn50 = (essentialMonthly * infMult) + (flexibleMonthly * infMult * (1 - deflation50));
-      bal50 = bal50 - (burn50 - monthlyRetainedIncome);
+      // Base essential & flexible with inflation
+      const curEssential = essentialMonthly * accumInf;
+      let curFlex50 = flexibleMonthly * accumInf;
+      let curFlex10 = flexibleMonthly * accumInf;
+      let curFlex90 = flexibleMonthly * accumInf;
 
-      // P10 Severe Stress (Shock load, zero income retention, high fixed drag)
-      const shock = m === 2 ? totalMonthlyExpense * 0.4 : 0;
-      const burn10 = (essentialMonthly * infMult * 1.1) + (flexibleMonthly * infMult * 0.85) + shock;
-      bal10 = bal10 - (burn10 - (inCrisis ? 0 : monthlyRetainedIncome));
+      // Original EFIS Panic Logic:
+      // runway = current_liquid_assets / (current_essential + current_flexible)
+      // if runway < 3 or current_liquid_assets <= 0: flexible *= 0.2 (cuts 80%)
+      const estimatedBurn = curEssential + curFlex50;
+      const runway50 = estimatedBurn > 0 ? bal50 / estimatedBurn : 0;
+      if (runway50 < 3 || bal50 <= 0) {
+        curFlex50 *= 0.2; // 80% discretionary deflation
+      }
 
-      // P90 Best Case (Aggressive 80% discretionary cut, yield generation)
-      const burn90 = (essentialMonthly * infMult) + (flexibleMonthly * infMult * 0.2);
-      bal90 = bal90 - (burn90 - monthlyRetainedIncome);
+      const runway10 = (curEssential + curFlex10) > 0 ? bal10 / (curEssential + curFlex10) : 0;
+      if (runway10 < 3 || bal10 <= 0) {
+        curFlex10 *= 0.2;
+      }
+
+      // Optimistic cuts early at 4 months
+      const runway90 = (curEssential + curFlex90) > 0 ? bal90 / (curEssential + curFlex90) : 0;
+      if (runway90 < 4 || bal90 <= 0) {
+        curFlex90 *= 0.15; // aggressive 85% cut
+      }
+
+      // Net Cashflow & Asset update
+      const netCashflow50 = currentIncome - (curEssential + curFlex50);
+      bal50 += netCashflow50;
+
+      const netCashflow10 = (inCrisis ? 0 : currentIncome) - (curEssential * 1.08 + curFlex10);
+      bal10 += netCashflow10;
+
+      const netCashflow90 = currentIncome - (curEssential + curFlex90);
+      bal90 += netCashflow90;
 
       p10Arr.push(Math.round(bal10));
       p50Arr.push(Math.round(bal50));
@@ -361,6 +399,7 @@ export default function Dashboard() {
 
   const trajectories = calculateTrajectories();
   const maxBalance = Math.max(effectiveLiquidAssets, ...trajectories.p90, 1);
+
 
   const handleSendMessage = () => {
     if (!chatInput.trim()) return;
